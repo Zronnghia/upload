@@ -1,0 +1,66 @@
+from pypylon import pylon
+import cv2
+import numpy as np
+
+# Khởi tạo camera Basler
+tl_factory = pylon.TlFactory.GetInstance()
+devices = tl_factory.EnumerateDevices()
+if len(devices) == 0:
+    raise Exception("Không tìm thấy camera Basler nào!")
+
+camera = pylon.InstantCamera(tl_factory.CreateFirstDevice())
+print(f"Đã kết nối với camera: {camera.GetDeviceInfo().GetModelName()}")
+
+camera.Open()
+camera.PixelFormat.SetValue("Mono8")  # Định dạng ảnh xám
+camera.ExposureTime.SetValue(10000.0)  # Thời gian phơi sáng
+camera.StartGrabbing(pylon.GrabStrategy_LatestImageOnly)
+
+# Khởi tạo ArUco
+parameters = cv2.aruco.DetectorParameters_create()
+aruco_dict = cv2.aruco.Dictionary_get(cv2.aruco.DICT_5X5_50)
+
+# Chu vi thực tế của marker (cm) - thay đổi nếu cần
+real_perimeter_cm = 20.0  # Ví dụ: marker có chu vi 20 cm (mỗi cạnh 5 cm)
+
+# Vòng lặp để phát hiện marker và tính pixel_cm_ratio
+while camera.IsGrabbing():
+    grab_result = camera.RetrieveResult(5000, pylon.TimeoutHandling_ThrowException)
+    if grab_result.GrabSucceeded():
+        img = grab_result.Array
+        if len(img.shape) == 2:  # Chuyển ảnh xám sang RGB
+            img = cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
+
+        # Phát hiện ArUco marker
+        corners, ids, _ = cv2.aruco.detectMarkers(img, aruco_dict, parameters=parameters)
+        if corners:  # Nếu phát hiện được marker
+            # Lấy marker đầu tiên
+            int_corners = np.int0(corners[0])
+            cv2.polylines(img, [int_corners], True, (0, 255, 0), 5)
+
+            # Tính chu vi marker bằng pixel
+            pixel_perimeter = cv2.arcLength(corners[0], True)
+
+            # Tính pixel_cm_ratio
+            pixel_cm_ratio = pixel_perimeter / real_perimeter_cm
+            print(f"Chu vi marker (pixel): {pixel_perimeter:.2f}")
+            print(f"Chu vi thực tế (cm): {real_perimeter_cm}")
+            print(f"pixel_cm_ratio: {pixel_cm_ratio:.2f} pixel/cm")
+
+            # Hiển thị pixel_cm_ratio trên ảnh
+            cv2.putText(img, f"pixel_cm_ratio: {pixel_cm_ratio:.2f}", 
+                        (10, 30), cv2.FONT_HERSHEY_PLAIN, 2, (0, 255, 0), 2)
+
+        # Hiển thị khung hình
+        cv2.imshow("Calculate pixel_cm_ratio", img)
+
+        # Thoát khi nhấn 'q'
+        if cv2.waitKey(1) & 0xFF == ord('q'):
+            break
+
+    grab_result.Release()
+
+# Giải phóng tài nguyên
+camera.StopGrabbing()
+camera.Close()
+cv2.destroyAllWindows()
